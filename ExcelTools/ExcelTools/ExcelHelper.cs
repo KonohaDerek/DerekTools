@@ -6,7 +6,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using ExcelHelper.Models;
+using Jil;
 using OfficeOpenXml;
+using OfficeOpenXml.Table;
 
 namespace ExcelHelper
 {
@@ -21,6 +23,7 @@ namespace ExcelHelper
         public static IEnumerable<T> ImportExcelAsync<T>(byte[] fileBytes , string workSheetsName="")
             where T : class, new()
         {
+            var result = default(IEnumerable<T>);
             using (MemoryStream fs = new MemoryStream(fileBytes))
             {
 
@@ -33,25 +36,12 @@ namespace ExcelHelper
                         throw new ArgumentNullException(string.Format("指定的工作表:{0}不存在。",workSheetsName));
                     }
                     List<T> RowData = new List<T>();
-
-                    bool isLastRow = false;
-                    int RowId = 2;   // 因為有標題列，所以從第2列開始讀起
-
-                    do  // 讀取資料，直到讀到空白列為止
-                    {
-                        string cellValue = sheet.Cells[RowId, 1].Text;
-                        if (string.IsNullOrEmpty(cellValue))
-                        {
-                            isLastRow = true;
-                        }
-                        else
-                        {
-                            
-                        }
-                    } while (!isLastRow);
+                   
+                    //處理Excel資料
+                    result = sheet.Tables.First().ConvertTableToObjects<T>();
                 }
             }
-            return null;
+            return result;
         }
 
         /// <summary>
@@ -120,6 +110,109 @@ namespace ExcelHelper
             }
         }
 
+        /// <summary>
+        /// 檢查資料
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="data"></param>
+        private static void CheckData<T>(T data) where T : class, new()
+        {
+            var Validator = new DataAnnotationValidator();
+            if (!Validator.TryValidate(data))
+            {
+                throw new Exception(string.Format("資料驗證失敗 : {0}", JSON.Serialize(Validator.ValidationResults.Select(o => o.ErrorMessage))));
+            }
+        }
+
+
+        private static IEnumerable<T> ConvertTableToObjects<T>(this ExcelTable table) where T : new()
+        {
+            //Get the properties of T
+            var tprops = typeof(T)
+                .GetProperties()
+                .ToList();
+
+            //Get the cells based on the table address
+            var groups = table.WorkSheet.Cells[table.Address.Start.Row, table.Address.Start.Column, table.Address.End.Row, table.Address.End.Column]
+                .GroupBy(cell => cell.Start.Row)
+                .ToList();
+
+            //Assume the second row represents column data types (big assumption!)
+            var types = groups
+                .Skip(1)
+                .First()
+                .Select(rcell => rcell.Value.GetType())
+                .ToList();
+
+            //Assume first row has the column names
+            var colnames = groups
+                .First()
+                .Select((hcell, idx) => new {
+                    Name = hcell.Value.ToString(),
+                    index = idx
+                })
+                .Where(o => tprops.Select(p => p.Name).Contains(o.Name))
+                .ToList();
+
+            //Everything after the header is data
+            var rowvalues = groups
+                .Skip(1) //Exclude header
+                .Select(cg => cg.Select(c => c.Value).ToList());
+
+
+            //Create the collection container
+            var collection = rowvalues
+                .Select(row =>
+                {
+                    var tnew = new T();
+                    colnames.ForEach(colname =>
+                    {
+                //This is the real wrinkle to using reflection - Excel stores all numbers as double including int
+                var val = row[colname.index];
+                        var type = types[colname.index];
+                        var prop = tprops.First(p => p.Name == colname.Name);
+
+                //If it is numeric it is a double since that is how excel stores all numbers
+                if (type == typeof(double))
+                        {
+                    //Unbox it
+                    var unboxedVal = (double)val;
+
+                    //FAR FROM A COMPLETE LIST!!!
+                    if (prop.PropertyType == typeof(Int32))
+                                prop.SetValue(tnew, (int)unboxedVal);
+                            else if (prop.PropertyType == typeof(double))
+                                prop.SetValue(tnew, unboxedVal);
+                            else if (prop.PropertyType == typeof(DateTime))
+                                prop.SetValue(tnew, convertDateTime(unboxedVal));
+                            else
+                                throw new NotImplementedException(String.Format("Type '{0}' not implemented yet!", prop.PropertyType.Name));
+                        }
+                        else
+                        {
+                    //Its a string
+                    prop.SetValue(tnew, val);
+                        }
+                    });
+
+                    return tnew;
+                });
+
+
+            //Send it back
+            return collection;
+        }
+
+        /// <summary>
+        /// 轉換日期
+        /// </summary>
+        /// <param name="unixTime"></param>
+        /// <returns></returns>
+        private static DateTime convertDateTime(double unixTime)
+        {
+           
+            return   DateTime.FromOADate(unixTime);
+        }
 
     }
 }
