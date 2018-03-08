@@ -20,17 +20,17 @@ namespace ExcelHelper
         /// <typeparam name="T"></typeparam>
         /// <param name="fileBytes"></param>
         /// <returns></returns>
-        public static IEnumerable<T> ImportExcelAsync<T>(byte[] fileBytes , string workSheetsName="")
+        public static List<T> ImportExcelAsync<T>(this byte[] fileBytes , string workSheetsName="")
             where T : class, new()
         {
-            var result = default(IEnumerable<T>);
+            var result = default(List<T>);
             using (MemoryStream fs = new MemoryStream(fileBytes))
             {
 
                 //載入Excel檔案
                 using (ExcelPackage ep = new ExcelPackage(fs))
                 {
-                    ExcelWorksheet sheet =string.IsNullOrWhiteSpace(workSheetsName) ? ep.Workbook.Worksheets[workSheetsName] : ep.Workbook.Worksheets[1];//取得Sheet
+                    ExcelWorksheet sheet =string.IsNullOrWhiteSpace(workSheetsName) ? ep.Workbook.Worksheets[1] : ep.Workbook.Worksheets[workSheetsName] ;//取得Sheet
                     if (sheet == null)
                     {
                         throw new ArgumentNullException(string.Format("指定的工作表:{0}不存在。",workSheetsName));
@@ -38,7 +38,7 @@ namespace ExcelHelper
                     List<T> RowData = new List<T>();
                    
                     //處理Excel資料
-                    result = sheet.Tables.First().ConvertTableToObjects<T>();
+                    result = sheet.ConvertTableToObjects<T>();
                 }
             }
             return result;
@@ -125,19 +125,21 @@ namespace ExcelHelper
         }
 
 
-        private static IEnumerable<T> ConvertTableToObjects<T>(this ExcelTable table) where T : new()
+        private static List<T> ConvertTableToObjects<T>(this ExcelWorksheet sheet) where T : new()
         {
+            //有無定義欄位的Flag
+            var definedFlag = sheet.Workbook.Names.Any();
             //Get the properties of T
             var tprops = typeof(T)
                 .GetProperties()
                 .ToList();
 
-            //Get the cells based on the table address
-            var groups = table.WorkSheet.Cells[table.Address.Start.Row, table.Address.Start.Column, table.Address.End.Row, table.Address.End.Column]
+            //取得總行數資料
+            var groups = sheet.Cells[sheet.Dimension.Start.Row, sheet.Dimension.Start.Column, sheet.Dimension.End.Row, sheet.Dimension.End.Column]
                 .GroupBy(cell => cell.Start.Row)
                 .ToList();
 
-            //Assume the second row represents column data types (big assumption!)
+            //由資料列的第一行取得每一欄的資料類型
             var types = groups
                 .Skip(1)
                 .First()
@@ -145,14 +147,11 @@ namespace ExcelHelper
                 .ToList();
 
             //Assume first row has the column names
-            var colnames = groups
-                .First()
-                .Select((hcell, idx) => new {
-                    Name = hcell.Value.ToString(),
-                    index = idx
-                })
-                .Where(o => tprops.Select(p => p.Name).Contains(o.Name))
-                .ToList();
+            var colnames = definedFlag ? 
+                //如果是使用定義表，則先行排序在處理
+                sheet.Workbook.Names.OrderBy(hcell=>hcell.Start.Column).Select((hcell, idx) => new {hcell.Name,index = idx}).Where(o => tprops.Select(p => p.Name).Contains(o.Name)).ToList() :
+                //如果不是則直接使用Group結果
+                groups.First().Select((hcell, idx) => new {Name = hcell.IsName? hcell.Text: hcell.Value.ToString(),index = idx}).Where(o => tprops.Select(p => p.Name).Contains(o.Name)).ToList();
 
             //Everything after the header is data
             var rowvalues = groups
@@ -167,31 +166,41 @@ namespace ExcelHelper
                     var tnew = new T();
                     colnames.ForEach(colname =>
                     {
-                //This is the real wrinkle to using reflection - Excel stores all numbers as double including int
-                var val = row[colname.index];
+                        //This is the real wrinkle to using reflection - Excel stores all numbers as double including int
+                        var val = row[colname.index];
                         var type = types[colname.index];
                         var prop = tprops.First(p => p.Name == colname.Name);
 
-                //If it is numeric it is a double since that is how excel stores all numbers
-                if (type == typeof(double))
+                        //If it is numeric it is a double since that is how excel stores all numbers
+                        if (type == typeof(double))
                         {
-                    //Unbox it
-                    var unboxedVal = (double)val;
+                            //Unbox it
+                            var unboxedVal = (double)val;
 
-                    //FAR FROM A COMPLETE LIST!!!
-                    if (prop.PropertyType == typeof(Int32))
+                            //FAR FROM A COMPLETE LIST!!!
+                            if (prop.PropertyType == typeof(Int32))
                                 prop.SetValue(tnew, (int)unboxedVal);
                             else if (prop.PropertyType == typeof(double))
                                 prop.SetValue(tnew, unboxedVal);
                             else if (prop.PropertyType == typeof(DateTime))
                                 prop.SetValue(tnew, convertDateTime(unboxedVal));
+                            else if (prop.PropertyType == typeof(string))
+                                prop.SetValue(tnew, Convert.ToString(unboxedVal));
                             else
                                 throw new NotImplementedException(String.Format("Type '{0}' not implemented yet!", prop.PropertyType.Name));
                         }
+                        //如果是日期格式則轉換
+                        else if (type == typeof(DateTime))
+                        {
+                            if (prop.PropertyType == typeof(DateTime))
+                                prop.SetValue(tnew, val);
+                            else
+                                prop.SetValue(tnew, ((DateTime)val).ToString());
+                        }
                         else
                         {
-                    //Its a string
-                    prop.SetValue(tnew, val);
+                            //Its a string
+                            prop.SetValue(tnew, val);
                         }
                     });
 
@@ -200,7 +209,7 @@ namespace ExcelHelper
 
 
             //Send it back
-            return collection;
+            return collection.ToList();
         }
 
         /// <summary>

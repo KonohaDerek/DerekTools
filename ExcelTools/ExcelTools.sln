@@ -5,6 +5,8 @@ VisualStudioVersion = 15.0.27130.2036
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExcelHelper", "ExcelTools\ExcelHelper.csproj", "{2EAB89BB-71F6-4DCF-9046-9D9357B44541}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExcelHelperTests", "ExcelHelperTests\ExcelHelperTests.csproj", "{746280E7-4EF5-491A-BC9A-3F80E0C84430}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{2EAB89BB-71F6-4DCF-9046-9D9357B44541}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2EAB89BB-71F6-4DCF-9046-9D9357B44541}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2EAB89BB-71F6-4DCF-9046-9D9357B44541}.Release|Any CPU.Build.0 = Release|Any CPU
+		{746280E7-4EF5-491A-BC9A-3F80E0C84430}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{746280E7-4EF5-491A-BC9A-3F80E0C84430}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{746280E7-4EF5-491A-BC9A-3F80E0C84430}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{746280E7-4EF5-491A-BC9A-3F80E0C84430}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
