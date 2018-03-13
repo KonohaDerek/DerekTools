@@ -54,8 +54,7 @@ namespace ExcelHelper.Tests
         public void ImportExcelAsyncTest()
         {
             //arrange
-
-            string path = @"D:\Coding\WorkProject\Githubs\DerekTools\ExcelTools\ExcelHelperTests\TestFile\一般.xlsx";
+            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestFile", "一般.xlsx");
             var fileInfo = new FileInfo(path);
             var fileByte = File.ReadAllBytes(path);
 
@@ -71,8 +70,39 @@ namespace ExcelHelper.Tests
         public void ImportExcelAsync_Define_Test()
         {
             //arrange
+            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestFile", "定義.xlsx");
+            var fileInfo = new FileInfo(path);
+            var fileByte = File.ReadAllBytes(path);
 
-            string path = @"D:\Coding\WorkProject\Githubs\DerekTools\ExcelTools\ExcelHelperTests\TestFile\定義.xlsx";
+            //action
+            var actual = fileByte.ImportExcelAsync<TestClass>();
+            //assert
+            Assert.IsNotNull(actual);
+            Assert.IsTrue(actual.Count() == 1);
+            Assert.IsNotNull(actual.First().one);
+        }
+
+        [TestMethod()]
+        public void ImportExcelAsync_Header_Test()
+        {
+            //arrange
+            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestFile", "一般 - 標頭.xlsx");
+            var fileInfo = new FileInfo(path);
+            var fileByte = File.ReadAllBytes(path);
+
+            //action
+            var actual = fileByte.ImportExcelAsync<TestClass>();
+            //assert
+            Assert.IsNotNull(actual);
+            Assert.IsTrue(actual.Count() == 1);
+            Assert.IsNotNull(actual.First().one);
+        }
+
+        [TestMethod()]
+        public void ImportExcelAsync_Define_Header_Test()
+        {
+            //arrange
+            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestFile", "定義 - 標頭.xlsx");
             var fileInfo = new FileInfo(path);
             var fileByte = File.ReadAllBytes(path);
 

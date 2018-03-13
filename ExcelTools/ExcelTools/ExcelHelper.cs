@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using ExcelHelper.Models;
@@ -139,23 +140,24 @@ namespace ExcelHelper
                 .GroupBy(cell => cell.Start.Row)
                 .ToList();
 
+            //取得資料起始欄
+            var rowIndex = definedFlag ? GetRowIndex(sheet, tprops) : GetRowIndex(groups, tprops) ;
+
+            //Assume first row has the column names
+            var colnames = definedFlag ? 
+                                 GetColnames(sheet, tprops)
+                                : GetColnames(groups.Skip(rowIndex-1).First(), tprops);
+
             //由資料列的第一行取得每一欄的資料類型
             var types = groups
-                .Skip(1)
+                .Skip(rowIndex)
                 .First()
                 .Select(rcell => rcell.Value.GetType())
                 .ToList();
 
-            //Assume first row has the column names
-            var colnames = definedFlag ? 
-                //如果是使用定義表，則先行排序在處理
-                sheet.Workbook.Names.OrderBy(hcell=>hcell.Start.Column).Select((hcell, idx) => new {hcell.Name,index = idx}).Where(o => tprops.Select(p => p.Name).Contains(o.Name)).ToList() :
-                //如果不是則直接使用Group結果
-                groups.First().Select((hcell, idx) => new {Name = hcell.IsName? hcell.Text: hcell.Value.ToString(),index = idx}).Where(o => tprops.Select(p => p.Name).Contains(o.Name)).ToList();
-
             //Everything after the header is data
             var rowvalues = groups
-                .Skip(1) //Exclude header
+                .Skip(rowIndex) //Exclude header
                 .Select(cg => cg.Select(c => c.Value).ToList());
 
 
@@ -167,9 +169,9 @@ namespace ExcelHelper
                     colnames.ForEach(colname =>
                     {
                         //This is the real wrinkle to using reflection - Excel stores all numbers as double including int
-                        var val = row[colname.index];
-                        var type = types[colname.index];
-                        var prop = tprops.First(p => p.Name == colname.Name);
+                        var val = row[colname.Item2];
+                        var type = types[colname.Item2];
+                        var prop = tprops.First(p => p.Name == colname.Item1);
 
                         //If it is numeric it is a double since that is how excel stores all numbers
                         if (type == typeof(double))
@@ -183,7 +185,7 @@ namespace ExcelHelper
                             else if (prop.PropertyType == typeof(double))
                                 prop.SetValue(tnew, unboxedVal);
                             else if (prop.PropertyType == typeof(DateTime))
-                                prop.SetValue(tnew, convertDateTime(unboxedVal));
+                                prop.SetValue(tnew, unboxedVal.ToDateTime());
                             else if (prop.PropertyType == typeof(string))
                                 prop.SetValue(tnew, Convert.ToString(unboxedVal));
                             else
@@ -213,14 +215,81 @@ namespace ExcelHelper
         }
 
         /// <summary>
-        /// 轉換日期
+        /// 取得ColumnIndex
         /// </summary>
-        /// <param name="unixTime"></param>
+        /// <param name="groups"></param>
+        /// <param name="sheet"></param>
+        /// <param name="tprops"></param>
         /// <returns></returns>
-        private static DateTime convertDateTime(double unixTime)
+        private static int GetRowIndex(List<IGrouping<int, ExcelRangeBase>> groups, List<PropertyInfo> tprops)
         {
-           
-            return   DateTime.FromOADate(unixTime);
+            foreach (var group in groups)
+            {
+               var rowIndexs =group.Select(o => new
+                {
+                    Name =  o.Text,
+                    rowIndex = o.Start.Row
+                }).Where(o => tprops.Select(p => p.Name).Contains(o.Name)).Select(o => o.rowIndex).Distinct();
+                var rowIndex = rowIndexs.Where(o => o > 0).Distinct().FirstOrDefault();
+                if (rowIndex > 0)
+                {
+                    return rowIndex;
+                }
+            }
+            //如果都沒有找到則預設跳過首列
+            return 1;
+        }
+
+        /// <summary>
+        /// 取得ColumnIndex
+        /// </summary>
+        /// <param name="groups"></param>
+        /// <param name="sheet"></param>
+        /// <param name="tprops"></param>
+        /// <returns></returns>
+        private static int GetRowIndex( ExcelWorksheet sheet, List<PropertyInfo> tprops)
+        {
+            return sheet.Workbook.Names.Select(hcell => new
+            {
+                hcell.Name,
+                rowIndex = hcell.Start.Row
+            }).Where(o => tprops.Select(p => p.Name).Contains(o.Name)).Select(o=>o.rowIndex).Distinct().First();
+        }
+
+        /// <summary>
+        /// 由群組取得對應的Colname
+        /// </summary>
+        /// <param name="groups"></param>
+        /// <param name="tprops"></param>
+        /// <returns></returns>
+        private static List<Tuple<string, int>> GetColnames(IGrouping<int, ExcelRangeBase> group, List<PropertyInfo> tprops)
+        {
+            return group.Select((hcell, idx) => new {
+                Name =  hcell.Text,
+                index = idx
+            }).Where(o => tprops.Select(p => p.Name).Contains(o.Name))
+              .AsEnumerable()
+            .Select(c => new Tuple<string, int>(c.Name, c.index)).ToList();
+        }
+
+     
+
+        /// <summary>
+        /// 由定義對應取得對應的Colnames
+        /// </summary>
+        /// <param name="sheet"></param>
+        /// <param name="tprops"></param>
+        /// <returns></returns>
+        private static List<Tuple<string,int>> GetColnames(ExcelWorksheet sheet, List<PropertyInfo> tprops)
+        {
+            //如果是使用定義表，則先行排序在處理
+            return sheet.Workbook.Names.OrderBy(hcell => hcell.Start.Column).Select((hcell, idx) => new
+            {
+                hcell.Name,
+                index = idx
+            }).Where(o => tprops.Select(p => p.Name).Contains(o.Name))
+            .AsEnumerable()
+            .Select(c => new Tuple<string, int>(c.Name, c.index)).ToList();
         }
 
     }
