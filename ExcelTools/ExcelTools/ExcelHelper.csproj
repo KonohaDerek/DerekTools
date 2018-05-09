@@ -56,7 +56,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Attribute\ExportAttribute.cs" />
     <Compile Include="Attribute\NestedValidationAttribute.cs" />
+    <Compile Include="Models\ExcelColumnValue.cs" />
     <Compile Include="Models\Validator\CompositeValidationResult.cs" />
     <Compile Include="Models\Validator\DataAnnotationValidator.cs" />
     <Compile Include="Models\FileDataInfo.cs" />

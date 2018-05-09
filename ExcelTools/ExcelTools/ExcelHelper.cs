@@ -1,20 +1,177 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
+using ExcelHelper.Attribute;
 using ExcelHelper.Models;
 using Jil;
 using OfficeOpenXml;
+using OfficeOpenXml.Style;
 using OfficeOpenXml.Table;
 
 namespace ExcelHelper
 {
     public static class ExcelHelper
     {
+        /// <summary>
+        /// 產生Execl byte array
+        /// </summary>
+        /// <typeparam name="TModel">匯出資料型別</typeparam>
+        /// <param name="datas">資料集合</param>
+        /// <param name="sheetName">工作表名稱</param>
+        /// <returns></returns>
+        public static byte[] ExportExcel<TModel>(IEnumerable<TModel> datas, string sheetName, string ExcelTitle = "")
+        {
+            if (datas == null) return null;
+            byte[] RET = null;
+            var execlColumes = new List<ExportAttribute>();             // 欄位資訊
+
+            // 取出操作對象的屬性
+            var Properties = typeof(TModel).GetProperties();
+            // 屬性字典
+            var temp_Properties = Properties.ToDictionary(o => o.Name);
+            // 資料內容字典
+            var temp = new Dictionary<string, List<object>>();
+            // 排序加值，當輸出欄位有安插"多重欄位"的屬性值則會用上此值做加值
+            int orderBonus = 0;
+
+            // 整理物件屬性提供的額外資訊
+            var propAttrs = (from expProp in Properties
+                             from expAttr in expProp.GetCustomAttributes(typeof(ExportAttribute), false).OfType<ExportAttribute>()
+                             select new
+                             {
+                                 Property = expProp,
+                                 Attribute = expAttr,
+                                 Order = expAttr.GetOrder()
+                             }).OrderBy(o => o.Order).ToList();
+
+
+            // 取得屬性類別上的 ExportAttribute 來分析，並建立資料字典
+            orderBonus = 0;
+            foreach (var propAttr in propAttrs)
+            {
+                var prop = propAttr.Property;
+                var attr = propAttr.Attribute;
+
+                // 有多重欄位時，展開欄位中的資訊
+                if (propAttr.Attribute.IsMultipleFields == true && datas?.Count() > 0)
+                {
+                    // 取得首筆資料提供的欄位陣列，datas中的欄位數前提必須相同才不會有輸出上的問題。
+                    var mainData = datas.First();
+                    var mulipleFields = (IEnumerable<ExcelColumnValue>)prop.GetValue(mainData);
+                    // 展開欄位時做 ExcelColumnValue 的內置排序
+                    mulipleFields = mulipleFields.OrderBy(o => o.Order);
+                    // 展開多重欄位的資訊，並且填入建立Excel的資料字典
+                    foreach (var mulipleField in mulipleFields)
+                    {
+                        orderBonus += 1;
+                        int orderField = attr.GetOrder() + orderBonus;
+                        var attrSub = new ExportAttribute(mulipleField.ColumnText, orderField, attr.GetFormat(), attr.GetDataType(), attr.GetNumberformat(), attr.GetFormula());
+                        attrSub.IsMultipleFields = false;
+                        attrSub.Name = mulipleField.Column;
+                        execlColumes.Add(attrSub);
+                        temp.Add(attrSub.Name, datas.Select(o => ((IEnumerable<ExcelColumnValue>)prop.GetValue(o)).FirstOrDefault(p => p.Column == attrSub.Name)?.Value).ToList());
+                    }
+                }
+                else
+                {
+                    // 判斷欄位輸出有插入值，則更新 ExportAttribute.Order 的順位。
+                    var attSub = (orderBonus == 0) ? attr :
+                        new ExportAttribute(attr.GetColumnHeader(), attr.GetOrder() + orderBonus, attr.GetFormat(), attr.GetDataType(), attr.GetNumberformat(), attr.GetFormula());
+                    attSub.Name = prop.Name;
+                    // 填入操作字典
+                    execlColumes.Add(attSub);
+                    temp.Add(prop.Name, datas.Select(o => prop.GetValue(o)).ToList());
+                }
+            }
+
+            // 在記憶體中建立一個Excel物件
+            using (ExcelPackage ep = new ExcelPackage())
+            {
+                ExcelWorksheet sheet = ep.Workbook.Worksheets.Add(sheetName);
+                #region 標頭
+                // 分拆設定好的欄位名稱/欄位值的索引資訊。
+                var excelTitleWithIndex = execlColumes.OrderBy(o => o.GetOrder())
+                                            .Select((title, index) => new {
+                                                value = title,
+                                                index,
+                                                hasFormula = !string.IsNullOrWhiteSpace(title.GetFormula())
+                                            }).ToList();
+
+                int startContentRowIndex = 1;
+                int HeaderCount = excelTitleWithIndex.Count();
+                if (!string.IsNullOrWhiteSpace(ExcelTitle))
+                {
+                    sheet.Cells["A1"].Value = ExcelTitle;
+                    sheet.Cells["A1"].Style.HorizontalAlignment = ExcelHorizontalAlignment.Center;//水平置中對齊
+                    sheet.Cells["A1"].Style.VerticalAlignment = ExcelVerticalAlignment.Center;//垂直置中對齊
+                    sheet.Cells["A1"].Style.Font.Size = 16;//字體大小
+                    sheet.Cells[1, 1, 1, HeaderCount].Merge = true;
+                    sheet.Cells["A1"].AutoFitColumns();    //自動調整欄位大小
+                    //添加標題，所以內容下移
+                    startContentRowIndex += 1;
+                }
+                // 填入標頭資料
+                foreach (var itme in excelTitleWithIndex)
+                {
+                    sheet.Cells[startContentRowIndex, 1 + itme.index].Value = itme.value.GetColumnHeader();
+                    sheet.Cells[startContentRowIndex, 1 + itme.index].AutoFitColumns();//自動調整欄位大小
+                }
+                //加完Header 將內容下移
+                startContentRowIndex += 1;
+                #endregion
+                // 寫入明細
+                object sheetValue = null;
+                Debug.WriteLine("開始:" + DateTime.Now.ToString("HH:mm:ss:ffff"));
+                foreach (var item in excelTitleWithIndex)
+                {
+                    int rowIndex = 0; // 用Index的原因是，資料量可能很大，Project會造成效率不彰。
+                    var propertity = temp_Properties.Get(item.value.Name);
+                    var temp_datas = temp.Get(item.value.Name);
+                    int celNum = 1 + item.index;
+                    var PropertyType = item.value.GetDataType() ?? propertity.PropertyType;
+                    var Numberformat = item.value.GetNumberformat();
+                    foreach (var dataRow in temp_datas)
+                    {
+                        int rowNum = startContentRowIndex + rowIndex;
+                        try
+                        {
+                            sheetValue = dataRow ?? "";
+                            //填入格式化數值
+                            sheetValue = item.value.GetFormatValue(sheetValue, PropertyType);
+                        }
+                        catch (Exception)
+                        {
+                            sheetValue = "";
+                        }
+                        //填入Excel 格式
+                        sheet.Cells[rowNum, celNum].Style.Numberformat.Format = Numberformat;
+                        sheet.Cells[rowNum, celNum].Value = sheetValue;
+                        rowIndex++;
+                    }
+                    if (item.hasFormula)
+                    {
+                        //修改Formula 只附加於整欄最下方
+                        //範圍為整欄資料
+                        sheet.Cells[startContentRowIndex + rowIndex, celNum].Formula = string.Format("{0}({1}:{2})", item.value.GetFormula(), sheet.Cells[startContentRowIndex, celNum].Address, sheet.Cells[startContentRowIndex + rowIndex - 1, celNum].Address);
+                        //填入Excel 格式
+                        //依原本欄位設置格式添加
+                        sheet.Cells[startContentRowIndex + rowIndex, celNum].Style.Numberformat.Format = Numberformat;
+                    }
+                }
+                sheet.Cells.AutoFitColumns();
+                Debug.WriteLine("結束:" + DateTime.Now.ToString("HH:mm:ss:ffff"));
+                RET = ep.GetAsByteArray();
+            }
+
+            return RET;
+        }
+
         /// <summary>
         /// 匯入Excel資料轉置為List<T>
         /// </summary>
@@ -125,7 +282,12 @@ namespace ExcelHelper
             }
         }
 
-
+        /// <summary>
+        /// 轉換資料表內資料至物件
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="sheet"></param>
+        /// <returns></returns>
         private static List<T> ConvertTableToObjects<T>(this ExcelWorksheet sheet) where T : new()
         {
             //有無定義欄位的Flag
