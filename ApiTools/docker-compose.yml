@@ -1,0 +1,8 @@
+version: '3'
+
+services:
+  apihelper:
+    image: apihelper
+    build:
+      context: .\ApiHelper
+      dockerfile: Dockerfile
