@@ -3,17 +3,17 @@
 # Add steps that build, run tests, deploy, and more:
 # https://aka.ms/yaml
 variables: # pipeline-level
-  branch: 'azure_branch'
+  branch: 'main'
+
 
 trigger:
-- master
+- main
+
 pool:
   vmImage: 'ubuntu-latest'
 steps:
 - script: |
-   git remote add github https://<username>:<password>@github.com/Brian-Ding/ant-design-blazor.git
+   git remote add github https://$(GITHUB_ACCOUNT):$(GITHUB_PAT)@github.com/KonohaDerek/PlaywrightDemo.git
    git checkout -b $(branch)
    git push -u github $(branch)
-
-
   displayName: 'Command Line Script'
